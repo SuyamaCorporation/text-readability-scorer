@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>文章読みやすさ スコアラー</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
+  <div class="max-w-3xl mx-auto px-4 py-10">
+    <header class="mb-8 text-center">
+      <h1 class="text-3xl font-bold text-white mb-1">文章読みやすさ スコアラー</h1>
+      <p class="text-gray-400 text-sm">Japanese Text Readability Scorer</p>
+    </header>
+
+    <div class="mb-4">
+      <label for="textInput" class="block text-sm font-medium text-gray-300 mb-2">
+        分析したい文章を入力してください
+      </label>
+      <textarea
+        id="textInput"
+        rows="10"
+        placeholder="ここに日本語の文章を入力してください..."
+        aria-label="分析テキスト入力"
+        class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical text-sm leading-relaxed"
+      ></textarea>
+    </div>
+
+    <div class="flex gap-3 mb-8">
+      <button
+        id="analyzeBtn"
+        class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400"
+        aria-label="文章を分析する"
+      >
+        分析する
+      </button>
+      <button
+        id="clearBtn"
+        class="bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-2.5 px-6 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-gray-500"
+        aria-label="入力をクリア"
+      >
+        クリア
+      </button>
+    </div>
+
+    <!-- Score Display -->
+    <div id="resultsSection" class="hidden">
+      <!-- Score Circle -->
+      <div class="flex flex-col items-center mb-8">
+        <div id="scoreCircle"
+          class="w-36 h-36 rounded-full flex flex-col items-center justify-center border-4 border-blue-500 bg-gray-800 shadow-lg mb-3"
+          role="status"
+          aria-live="polite"
+        >
+          <span id="scoreValue" class="text-5xl font-bold text-white"></span>
+          <span class="text-xs text-gray-400 mt-1">/ 100</span>
+        </div>
+        <span id="scoreLabel" class="text-lg font-semibold"></span>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+          <p class="text-gray-400 text-xs mb-1">文字数</p>
+          <p id="statChars" class="text-2xl font-bold text-white"></p>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+          <p class="text-gray-400 text-xs mb-1">文数</p>
+          <p id="statSentences" class="text-2xl font-bold text-white"></p>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+          <p class="text-gray-400 text-xs mb-1">平均文長（文字）</p>
+          <p id="statAvgLen" class="text-2xl font-bold text-white"></p>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+          <p class="text-gray-400 text-xs mb-1">句読点密度（per100字）</p>
+          <p id="statPunctDensity" class="text-2xl font-bold text-white"></p>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+          <p class="text-gray-400 text-xs mb-1">読了時間（目安）</p>
+          <p id="statReadTime" class="text-2xl font-bold text-white"></p>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 text-center">
+          <p class="text-gray-400 text-xs mb-1">段落数</p>
+          <p id="statParagraphs" class="text-2xl font-bold text-white"></p>
+        </div>
+      </div>
+
+      <!-- Suggestions -->
+      <div id="suggestionsSection" class="bg-gray-800 rounded-lg p-5">
+        <h2 class="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wide">改善アドバイス</h2>
+        <ul id="suggestionsList" class="space-y-2" aria-label="改善提案リスト"></ul>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="emptyState" class="text-center text-gray-500 py-16">
+      <p class="text-4xl mb-3" aria-hidden="true">📝</p>
+      <p class="text-sm">文章を入力して「分析する」をクリックしてください</p>
+    </div>
+  </div>
+
+  <script>
+    const textInput = document.getElementById('textInput');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const resultsSection = document.getElementById('resultsSection');
+    const emptyState = document.getElementById('emptyState');
+
+    function countSentences(text) {
+      // Split by Japanese sentence-ending punctuation (。！？) and ellipsis
+      const parts = text.split(/[。！？…]+/).filter(s => s.trim().length > 0);
+      return parts.length;
+    }
+
+    function countPunctuation(text) {
+      // Count 。、！？ etc.
+      const matches = text.match(/[。、！？；：]/g);
+      return matches ? matches.length : 0;
+    }
+
+    function computeScore(avgSentenceLen, punctDensity) {
+      // Ideal: avg sentence length 20-40 chars, punctuation density 2-5 per 100 chars
+      let score = 100;
+
+      // Penalize for long sentences
+      if (avgSentenceLen > 60) score -= 40;
+      else if (avgSentenceLen > 50) score -= 30;
+      else if (avgSentenceLen > 40) score -= 15;
+      else if (avgSentenceLen > 30) score -= 5;
+
+      // Penalize for short sentences (choppy)
+      if (avgSentenceLen < 10) score -= 15;
+
+      // Penalize for low punctuation density
+      if (punctDensity < 1) score -= 25;
+      else if (punctDensity < 2) score -= 10;
+
+      // Penalize for very high punctuation density (over-punctuated)
+      if (punctDensity > 8) score -= 10;
+
+      return Math.max(0, Math.min(100, Math.round(score)));
+    }
+
+    function getScoreLabel(score) {
+      if (score >= 80) return { label: '読みやすい', color: 'text-green-400' };
+      if (score >= 60) return { label: 'やや読みやすい', color: 'text-yellow-400' };
+      if (score >= 40) return { label: '改善の余地あり', color: 'text-orange-400' };
+      return { label: '読みにくい', color: 'text-red-400' };
+    }
+
+    function buildSuggestions(avgSentenceLen, punctDensity, charCount) {
+      const suggestions = [];
+
+      if (avgSentenceLen > 50) {
+        suggestions.push({ icon: '⚠️', text: '1文が長すぎます（目安: 40文字以内）。文を区切ることを検討してください。', type: 'warn' });
+      } else if (avgSentenceLen > 40) {
+        suggestions.push({ icon: '💡', text: '1文がやや長めです。短く区切るとさらに読みやすくなります。', type: 'info' });
+      }
+
+      if (punctDensity < 1) {
+        suggestions.push({ icon: '⚠️', text: '句読点が少なすぎます。読点「、」や句点「。」を適切に追加してください。', type: 'warn' });
+      } else if (punctDensity < 2) {
+        suggestions.push({ icon: '💡', text: '句読点がやや少ないです。適切な位置に読点を追加するとリズムが改善されます。', type: 'info' });
+      }
+
+      if (punctDensity > 8) {
+        suggestions.push({ icon: '💡', text: '句読点が多すぎる可能性があります。過剰な読点は読みにくさの原因になります。', type: 'info' });
+      }
+
+      if (charCount < 50) {
+        suggestions.push({ icon: 'ℹ️', text: 'テキストが短いため、スコアの精度が低い場合があります。', type: 'info' });
+      }
+
+      if (avgSentenceLen >= 15 && avgSentenceLen <= 40 && punctDensity >= 2 && punctDensity <= 6) {
+        suggestions.push({ icon: '✅', text: '文章の構造はバランスが取れています。', type: 'good' });
+      }
+
+      if (suggestions.length === 0) {
+        suggestions.push({ icon: '✅', text: '特に改善が必要な点は見当たりません。読みやすい文章です！', type: 'good' });
+      }
+
+      return suggestions;
+    }
+
+    function analyze() {
+      const text = textInput.value;
+      if (!text.trim()) {
+        emptyState.classList.remove('hidden');
+        resultsSection.classList.add('hidden');
+        return;
+      }
+
+      const charCount = text.replace(/\s/g, '').length;
+      const totalChars = text.length;
+      const sentenceCount = Math.max(1, countSentences(text));
+      const avgSentenceLen = Math.round(charCount / sentenceCount);
+      const punctCount = countPunctuation(text);
+      const punctDensity = totalChars > 0 ? parseFloat(((punctCount / totalChars) * 100).toFixed(1)) : 0;
+      const readTimeSec = charCount > 0 ? charCount / (400 / 60) : 0;
+      const readTimeMin = Math.floor(readTimeSec / 60);
+      const readTimeSecs = Math.round(readTimeSec % 60);
+      const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0).length;
+
+      const score = computeScore(avgSentenceLen, punctDensity);
+      const { label, color } = getScoreLabel(score);
+
+      // Update score
+      document.getElementById('scoreValue').textContent = score;
+      const scoreLabel = document.getElementById('scoreLabel');
+      scoreLabel.textContent = label;
+      scoreLabel.className = 'text-lg font-semibold ' + color;
+
+      // Update circle border color
+      const scoreCircle = document.getElementById('scoreCircle');
+      scoreCircle.className = scoreCircle.className.replace(/border-\w+-\d+/, '');
+      if (score >= 80) scoreCircle.style.borderColor = '#4ade80';
+      else if (score >= 60) scoreCircle.style.borderColor = '#facc15';
+      else if (score >= 40) scoreCircle.style.borderColor = '#fb923c';
+      else scoreCircle.style.borderColor = '#f87171';
+
+      // Update stats using textContent
+      document.getElementById('statChars').textContent = charCount.toLocaleString();
+      document.getElementById('statSentences').textContent = sentenceCount;
+      document.getElementById('statAvgLen').textContent = avgSentenceLen;
+      document.getElementById('statPunctDensity').textContent = punctDensity;
+      document.getElementById('statReadTime').textContent =
+        readTimeMin > 0 ? readTimeMin + '分' + readTimeSecs + '秒' : readTimeSecs + '秒';
+      document.getElementById('statParagraphs').textContent = paragraphs;
+
+      // Build suggestions safely using textContent
+      const suggestions = buildSuggestions(avgSentenceLen, punctDensity, charCount);
+      const ul = document.getElementById('suggestionsList');
+      ul.innerHTML = '';
+      suggestions.forEach(s => {
+        const li = document.createElement('li');
+        li.className = 'flex items-start gap-2 text-sm ' +
+          (s.type === 'warn' ? 'text-orange-300' :
+           s.type === 'good' ? 'text-green-400' : 'text-gray-300');
+        const icon = document.createElement('span');
+        icon.textContent = s.icon;
+        icon.setAttribute('aria-hidden', 'true');
+        const txt = document.createElement('span');
+        txt.textContent = s.text;
+        li.appendChild(icon);
+        li.appendChild(txt);
+        ul.appendChild(li);
+      });
+
+      emptyState.classList.add('hidden');
+      resultsSection.classList.remove('hidden');
+    }
+
+    analyzeBtn.addEventListener('click', analyze);
+    clearBtn.addEventListener('click', () => {
+      textInput.value = '';
+      emptyState.classList.remove('hidden');
+      resultsSection.classList.add('hidden');
+    });
+
+    textInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) analyze();
+    });
+  </script>
+</body>
+</html>
